@@ -16,7 +16,8 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
 BASE_URL = os.getenv("BASE_URL")  # e.g. https://your-app.up.railway.app
-
+if not BASE_URL:
+    raise ValueError("BASE_URL missing")
 if not TOKEN:
     raise ValueError("BOT_TOKEN missing")
 
@@ -116,7 +117,11 @@ async def add(m: types.Message):
 
 # ================= API SERVER =================
 async def api_series(request):
-    user_id = int(request.query.get("user_id"))
+    user_id = request.query.get("user_id")
+if not user_id:
+    return web.json_response([])
+
+user_id = int(user_id)
     with db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id,name,poster FROM series WHERE user_id=?", (user_id,))
@@ -129,17 +134,26 @@ async def api_series(request):
 
 async def start_web():
     app = web.Application()
+
+    # API
     app.router.add_get("/api/series", api_series)
+
+    # статика (css/js)
     app.router.add_static("/static/", path="./web", name="static")
 
-async def index(request):
-    return web.FileResponse("./web/index.html")
+    # главная страница
+    async def index(request):
+        return web.FileResponse("./web/index.html")
 
-app.router.add_get("/", index)
+    app.router.add_get("/", index)
+
+    # запуск сервера
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
+
+    print("🌐 WebApp запущен")
 
 # ================= MAIN =================
 async def main():
