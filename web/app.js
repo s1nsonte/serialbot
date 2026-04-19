@@ -4,129 +4,120 @@ tg.expand();
 const user = tg.initDataUnsafe?.user;
 
 if (!user) {
-    document.body.innerHTML = "Открывай через Telegram";
+    document.body.innerHTML = "Open from Telegram";
 }
 
-const app = document.getElementById("app");
+const API = "/api";
+
+let currentSeries = null;
 
 // ================= LOAD LIST =================
 async function loadSeries() {
-    const res = await fetch(`/api/series?user_id=${user.id}`);
+    const res = await fetch(`${API}/series?user_id=${user.id}`);
     const data = await res.json();
 
+    const app = document.getElementById("app");
     app.innerHTML = "";
 
     data.forEach(s => {
-        const card = document.createElement("div");
-        card.className = "card";
+        const total = Object.values(s.episodes || {}).reduce((a,b)=>a+b,0);
 
-        card.innerHTML = `
+        const d = document.createElement("div");
+        d.className = "card";
+
+        d.innerHTML = `
             <img src="${s.poster}">
-            <div class="overlay">
+            <div class="card-body">
                 <div class="title">${s.name}</div>
+                <div class="progress">
+                    <div class="bar" style="width:0%"></div>
+                </div>
+                <div class="meta">0 / ${total}</div>
                 <button onclick="openSeries(${s.id})">Подробнее</button>
             </div>
         `;
 
-        app.appendChild(card);
+        app.appendChild(d);
     });
 }
 
 // ================= OPEN SERIES =================
 async function openSeries(id) {
-    const res = await fetch(`/api/series_detail?series_id=${id}`);
+    const res = await fetch(`${API}/series_detail?series_id=${id}`);
     const data = await res.json();
 
+    currentSeries = data;
+
+    renderSeries(data);
+}
+
+// ================= RENDER SERIES =================
+function renderSeries(data) {
+    const app = document.getElementById("app");
+
+    const seasons = Object.keys(data.episodes).sort((a,b)=>a-b);
+
     app.innerHTML = `
-        <div class="back" onclick="loadSeries()">← Назад</div>
-
-        <div class="hero">
-            <img src="${data.poster}">
-            <div class="hero-title">${data.name}</div>
+        <div class="hero" style="background-image:url('${data.poster}')">
+            <div class="overlay">
+                <h1>${data.name}</h1>
+                <div class="season-tabs">
+                    ${seasons.map(s=>`<div onclick="selectSeason(${s})" id="tab-${s}">S${s}</div>`).join("")}
+                </div>
+                <div id="episodes"></div>
+            </div>
         </div>
-
-        <div id="seasons"></div>
-
-        <button class="delete" onclick="deleteSeries(${id})">Удалить сериал</button>
+        <button class="back" onclick="loadSeries()">← Назад</button>
     `;
 
-    const seasonsDiv = document.getElementById("seasons");
+    selectSeason(seasons[0]);
+}
 
-    data.seasons.forEach(season => {
-        const total = season.total;
-        const watched = season.watched.length;
+// ================= SELECT SEASON =================
+function selectSeason(season) {
+    document.querySelectorAll(".season-tabs div").forEach(e=>e.classList.remove("active"));
+    document.getElementById(`tab-${season}`).classList.add("active");
 
-        const percent = Math.floor((watched / total) * 100);
+    const total = currentSeries.episodes[season];
 
-        const block = document.createElement("div");
-        block.className = "season";
+    const watchedSet = new Set(
+        currentSeries.watched.map(w => `${w[0]}-${w[1]}`)
+    );
 
-        block.innerHTML = `
-            <div class="season-header">
-                Сезон ${season.season}
-                <span>${watched} / ${total}</span>
-            </div>
+    const container = document.getElementById("episodes");
 
-            <div class="progress">
-                <div class="bar" style="width:${percent}%"></div>
-            </div>
+    container.innerHTML = `
+        <div class="episodes">
+            ${Array.from({length: total}, (_,i)=>{
+                const ep = i+1;
+                const key = `${season}-${ep}`;
+                const watched = watchedSet.has(key);
 
-            <div class="episodes" id="season-${season.season}"></div>
-        `;
-
-        seasonsDiv.appendChild(block);
-
-        const epContainer = document.getElementById(`season-${season.season}`);
-
-        for (let i = 1; i <= total; i++) {
-            const ep = document.createElement("div");
-            ep.className = "episode";
-
-            if (season.watched.includes(i)) {
-                ep.classList.add("watched");
-            }
-
-            ep.innerText = i;
-
-            ep.onclick = async () => {
-                await toggleEpisode(id, season.season, i);
-                openSeries(id); // перерисовка
-            };
-
-            epContainer.appendChild(ep);
-        }
-    });
+                return `
+                    <div class="ep ${watched ? "watched":""}"
+                        onclick="toggle(${season},${ep})">
+                        ${ep}
+                    </div>
+                `;
+            }).join("")}
+        </div>
+    `;
 }
 
 // ================= TOGGLE =================
-async function toggleEpisode(series_id, season, episode) {
+async function toggle(season, episode) {
     await fetch("/api/toggle", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
         body: JSON.stringify({
-            series_id,
+            series_id: currentSeries.id,
             season,
             episode
         })
     });
+
+    openSeries(currentSeries.id);
 }
 
-// ================= DELETE =================
-async function deleteSeries(id) {
-    if (!confirm("Удалить сериал?")) return;
-
-    await fetch("/api/delete", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ series_id: id })
-    });
-
-    loadSeries();
-}
-
-// ================= START =================
+// INIT
 loadSeries();
