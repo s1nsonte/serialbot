@@ -193,7 +193,7 @@ async def api_series_detail(request):
         "watched": list(watched_map)
     })
 
-async def api_toggle(request):
+async def toggle_episode(request):
     data = await request.json()
 
     series_id = data["series_id"]
