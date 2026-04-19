@@ -225,7 +225,7 @@ async def start_web():
 
     app.router.add_get("/api/series", api_series)
     app.router.add_get("/api/series_detail", api_series_detail)
-    app.router.add_post("/api/toggle", api_toggle)
+    app.router.add_post("/api/toggle_episode", toggle_episode)
 
     app.router.add_static("/static/", path="./web", name="static")
 
