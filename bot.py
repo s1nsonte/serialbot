@@ -118,10 +118,12 @@ async def add(m: types.Message):
 # ================= API SERVER =================
 async def api_series(request):
     user_id = request.query.get("user_id")
-if not user_id:
-    return web.json_response([])
 
-user_id = int(user_id)
+    if not user_id:
+        return web.json_response([])
+
+    user_id = int(user_id)
+
     with db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id,name,poster FROM series WHERE user_id=?", (user_id,))
