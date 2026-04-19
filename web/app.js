@@ -7,108 +7,130 @@ if (!user) {
     document.body.innerHTML = "Open from Telegram";
 }
 
-const API = "/api";
-
 let currentSeries = null;
 
-// ================= LOAD LIST =================
+// ================= LOAD SERIES =================
 async function loadSeries() {
-    const res = await fetch(`${API}/series?user_id=${user.id}`);
+    const res = await fetch(`/api/series?user_id=${user.id}`);
     const data = await res.json();
 
     const app = document.getElementById("app");
     app.innerHTML = "";
 
     data.forEach(s => {
-        const total = Object.values(s.episodes || {}).reduce((a,b)=>a+b,0);
+        const card = document.createElement("div");
+        card.className = "card";
 
-        const d = document.createElement("div");
-        d.className = "card";
-
-        d.innerHTML = `
-            <img src="${s.poster}">
-            <div class="card-body">
-                <div class="title">${s.name}</div>
-                <div class="progress">
-                    <div class="bar" style="width:0%"></div>
-                </div>
-                <div class="meta">0 / ${total}</div>
-                <button onclick="openSeries(${s.id})">Подробнее</button>
+        card.innerHTML = `
+            <img src="${s.poster}" />
+            <div class="title">${s.name}</div>
+            <div class="meta">${buildSeasonsInfo(s)}</div>
+            <div class="progress">
+                <div class="bar" style="width:${calcProgress(s)}%"></div>
             </div>
+            <button onclick="openSeries(${s.id})">Подробнее</button>
         `;
 
-        app.appendChild(d);
+        app.appendChild(card);
     });
+}
+
+// ================= META =================
+function buildSeasonsInfo(s) {
+    if (!s.episodes) return "";
+
+    let text = "";
+    for (let season in s.episodes) {
+        text += `С${season}: ${s.episodes[season]} серий<br>`;
+    }
+    return text;
+}
+
+function calcProgress(s) {
+    if (!s.episodes) return 0;
+
+    let total = 0;
+    let watched = 0;
+
+    for (let season in s.episodes) {
+        total += s.episodes[season];
+    }
+
+    if (s.watched) {
+        watched = s.watched.length;
+    }
+
+    return total ? (watched / total) * 100 : 0;
 }
 
 // ================= OPEN SERIES =================
 async function openSeries(id) {
-    const res = await fetch(`${API}/series_detail?series_id=${id}`);
-    const data = await res.json();
+    const res = await fetch(`/api/series_detail?series_id=${id}`);
+    const s = await res.json();
 
-    currentSeries = data;
+    currentSeries = s;
 
-    renderSeries(data);
-}
-
-// ================= RENDER SERIES =================
-function renderSeries(data) {
     const app = document.getElementById("app");
+    app.innerHTML = "";
 
-    const seasons = Object.keys(data.episodes).sort((a,b)=>a-b);
+    // HEADER (Netflix style)
+    const header = document.createElement("div");
+    header.className = "hero";
 
-    app.innerHTML = `
-        <div class="hero" style="background-image:url('${data.poster}')">
-            <div class="overlay">
-                <h1>${data.name}</h1>
-                <div class="season-tabs">
-                    ${seasons.map(s=>`<div onclick="selectSeason(${s})" id="tab-${s}">S${s}</div>`).join("")}
-                </div>
-                <div id="episodes"></div>
-            </div>
-        </div>
-        <button class="back" onclick="loadSeries()">← Назад</button>
-    `;
-
-    selectSeason(seasons[0]);
-}
-
-// ================= SELECT SEASON =================
-function selectSeason(season) {
-    document.querySelectorAll(".season-tabs div").forEach(e=>e.classList.remove("active"));
-    document.getElementById(`tab-${season}`).classList.add("active");
-
-    const total = currentSeries.episodes[season];
-
-    const watchedSet = new Set(
-        currentSeries.watched.map(w => `${w[0]}-${w[1]}`)
-    );
-
-    const container = document.getElementById("episodes");
-
-    container.innerHTML = `
-        <div class="episodes">
-            ${Array.from({length: total}, (_,i)=>{
-                const ep = i+1;
-                const key = `${season}-${ep}`;
-                const watched = watchedSet.has(key);
-
-                return `
-                    <div class="ep ${watched ? "watched":""}"
-                        onclick="toggle(${season},${ep})">
-                        ${ep}
-                    </div>
-                `;
-            }).join("")}
+    header.innerHTML = `
+        <img src="${s.poster}" class="hero-img"/>
+        <div class="hero-overlay"></div>
+        <div class="hero-info">
+            <h2>${s.name}</h2>
+            <button onclick="back()">← Назад</button>
         </div>
     `;
+
+    app.appendChild(header);
+
+    // SEASONS
+    const seasonsBlock = document.createElement("div");
+    seasonsBlock.className = "seasons";
+
+    Object.keys(s.episodes).forEach(season => {
+        const seasonDiv = document.createElement("div");
+        seasonDiv.className = "season";
+
+        seasonDiv.innerHTML = `<h3>Сезон ${season}</h3>`;
+
+        const episodesRow = document.createElement("div");
+        episodesRow.className = "episodes-row";
+
+        for (let i = 1; i <= s.episodes[season]; i++) {
+            const ep = document.createElement("div");
+
+            const isWatched = s.watched?.some(
+                w => w.season == season && w.episode == i
+            );
+
+            ep.className = "episode " + (isWatched ? "watched" : "");
+
+            ep.innerHTML = `
+                <div class="ep-num">E${i}</div>
+            `;
+
+            ep.onclick = () => toggleEpisode(season, i, ep);
+
+            episodesRow.appendChild(ep);
+        }
+
+        seasonDiv.appendChild(episodesRow);
+        seasonsBlock.appendChild(seasonDiv);
+    });
+
+    app.appendChild(seasonsBlock);
 }
 
 // ================= TOGGLE =================
-async function toggle(season, episode) {
-    await fetch("/api/toggle", {
-        method:"POST",
-        headers: {"Content-Type":"application/json"},
+async function toggleEpisode(season, episode, el) {
+    const res = await fetch("/api/toggle_episode", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
             series_id: currentSeries.id,
             season,
@@ -116,8 +138,19 @@ async function toggle(season, episode) {
         })
     });
 
-    openSeries(currentSeries.id);
+    const data = await res.json();
+
+    if (data.watched) {
+        el.classList.add("watched");
+    } else {
+        el.classList.remove("watched");
+    }
 }
 
-// INIT
+// ================= BACK =================
+function back() {
+    loadSeries();
+}
+
+// ================= START =================
 loadSeries();
