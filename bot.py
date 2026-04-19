@@ -1,40 +1,25 @@
-import asyncio
-import logging
 import os
 import json
-from collections import defaultdict
-
-import aiohttp
-from aiohttp import web
+import asyncio
 import asyncpg
+from aiohttp import web
+from aiogram import Bot, Dispatcher
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-
-logging.basicConfig(level=logging.INFO)
-
-TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = os.getenv("BASE_URL")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not TOKEN:
-    raise ValueError("BOT_TOKEN missing")
-
-if not BASE_URL:
-    raise ValueError("BASE_URL missing")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL missing")
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
 db_pool = None
 
-# ================= DB =================
 
+# =========================
+# 🔌 DB INIT
+# =========================
 async def init_db():
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL)
@@ -46,155 +31,104 @@ async def init_db():
             user_id BIGINT,
             name TEXT,
             poster TEXT,
-            tvmaze_id INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS episodes (
-            id SERIAL PRIMARY KEY,
-            series_id INTEGER,
-            season INTEGER,
-            episode INTEGER,
-            UNIQUE(series_id, season, episode)
-        );
-
-        CREATE TABLE IF NOT EXISTS watched (
-            series_id INTEGER,
-            season INTEGER,
-            episode INTEGER,
-            UNIQUE(series_id, season, episode)
+            episodes_json JSONB
         );
         """)
 
-# ================= API TV =================
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS watched (
+            id SERIAL PRIMARY KEY,
+            series_id INT,
+            season INT,
+            episode INT
+        );
+        """)
 
-async def get_tvmaze(query):
-    async with aiohttp.ClientSession() as s:
-        async with s.get(f"https://api.tvmaze.com/search/shows?q={query}") as r:
-            data = await r.json()
-            return data[0]["show"] if data else None
 
-async def get_episodes(tvmaze_id):
-    async with aiohttp.ClientSession() as s:
-        async with s.get(f"https://api.tvmaze.com/shows/{tvmaze_id}/episodes") as r:
-            return await r.json()
-
-# ================= BOT =================
-
-@dp.message(Command("start"))
-async def start(m: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🎬 Открыть",
-            web_app=WebAppInfo(url=BASE_URL)
-        )]
-    ])
-    await m.answer("Открывай 👇", reply_markup=kb)
-
-@dp.message(Command("add"))
-async def add(m: types.Message):
-    query = m.text.replace("/add", "").strip()
-
-    show = await get_tvmaze(query)
-    if not show:
-        await m.answer("Не найдено")
-        return
-
-    episodes = await get_episodes(show["id"])
-
-    async with db_pool.acquire() as conn:
-        series_id = await conn.fetchval("""
-            INSERT INTO series (user_id, name, poster, tvmaze_id)
-            VALUES ($1,$2,$3,$4)
-            RETURNING id
-        """, m.from_user.id, show["name"], show.get("image", {}).get("original"), show["id"])
-
-        # записываем все серии
-        for ep in episodes:
-            await conn.execute("""
-                INSERT INTO episodes (series_id, season, episode)
-                VALUES ($1,$2,$3)
-                ON CONFLICT DO NOTHING
-            """, series_id, ep["season"], ep["number"])
-
-    await m.answer(f"✅ Добавлен: {show['name']}")
-
-# ================= API =================
-
+# =========================
+# 📺 API: список сериалов
+# =========================
 async def api_series(request):
-    user_id = int(request.query.get("user_id"))
+    user_id = request.query.get("user_id")
 
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM series WHERE user_id=$1
-        """, user_id)
+        rows = await conn.fetch(
+            "SELECT * FROM series WHERE user_id=$1",
+            int(user_id)
+        )
 
         result = []
 
         for r in rows:
-            episodes = await conn.fetch("""
-                SELECT season, episode FROM episodes
+            episodes = r["episodes_json"] or {}
+
+            seasons = {}
+            total = 0
+
+            for season, eps in episodes.items():
+                total_eps = len(eps)
+
+                watched = await conn.fetchrow("""
+                    SELECT COUNT(*) FROM watched 
+                    WHERE series_id=$1 AND season=$2
+                """, r["id"], int(season))
+
+                watched_count = watched["count"]
+
+                seasons[season] = {
+                    "watched": watched_count,
+                    "total": total_eps
+                }
+
+                total += total_eps
+
+            watched_total = await conn.fetchrow("""
+                SELECT COUNT(*) FROM watched 
                 WHERE series_id=$1
             """, r["id"])
-
-            watched = await conn.fetch("""
-                SELECT season, episode FROM watched
-                WHERE series_id=$1
-            """, r["id"])
-
-            total = len(episodes)
-            watched_count = len(watched)
 
             result.append({
                 "id": r["id"],
                 "name": r["name"],
                 "poster": r["poster"],
-                "progress": watched_count,
-                "total": total
+                "watched": watched_total["count"],
+                "total": total,
+                "seasons": seasons
             })
 
-    return web.json_response(result)
+        return web.json_response(result)
 
-# ================= DETAIL =================
 
+# =========================
+# 🎬 API: детали сериала
+# =========================
 async def api_series_detail(request):
-    series_id = int(request.query.get("series_id"))
+    series_id = request.query.get("series_id")
 
     async with db_pool.acquire() as conn:
-        series = await conn.fetchrow("""
-            SELECT * FROM series WHERE id=$1
-        """, series_id)
-
-        episodes = await conn.fetch("""
-            SELECT season, episode FROM episodes
-            WHERE series_id=$1
-            ORDER BY season, episode
-        """, series_id)
+        row = await conn.fetchrow(
+            "SELECT * FROM series WHERE id=$1",
+            int(series_id)
+        )
 
         watched = await conn.fetch("""
-            SELECT season, episode FROM watched
+            SELECT season, episode FROM watched 
             WHERE series_id=$1
-        """, series_id)
+        """, int(series_id))
 
-    watched_set = {(w["season"], w["episode"]) for w in watched}
-
-    seasons = defaultdict(list)
-
-    for ep in episodes:
-        seasons[ep["season"]].append({
-            "episode": ep["episode"],
-            "watched": (ep["season"], ep["episode"]) in watched_set
+        return web.json_response({
+            "id": row["id"],
+            "name": row["name"],
+            "poster": row["poster"],
+            "episodes": row["episodes_json"],
+            "watched": [[w["season"], w["episode"]] for w in watched]
         })
 
-    return web.json_response({
-        "id": series["id"],
-        "name": series["name"],
-        "poster": series["poster"],
-        "seasons": seasons
-    })
 
-# ================= TOGGLE =================
-
-async def toggle_episode(request):
+# =========================
+# 🔄 API: toggle эпизода
+# =========================
+async def api_toggle_episode(request):
     data = await request.json()
 
     series_id = data["series_id"]
@@ -203,52 +137,78 @@ async def toggle_episode(request):
 
     async with db_pool.acquire() as conn:
         exists = await conn.fetchrow("""
-            SELECT 1 FROM watched
+            SELECT * FROM watched 
             WHERE series_id=$1 AND season=$2 AND episode=$3
         """, series_id, season, episode)
 
         if exists:
             await conn.execute("""
-                DELETE FROM watched
+                DELETE FROM watched 
                 WHERE series_id=$1 AND season=$2 AND episode=$3
             """, series_id, season, episode)
         else:
             await conn.execute("""
                 INSERT INTO watched (series_id, season, episode)
-                VALUES ($1,$2,$3)
+                VALUES ($1, $2, $3)
             """, series_id, season, episode)
 
     return web.json_response({"ok": True})
 
-# ================= WEB =================
 
+# =========================
+# ➕ API: добавить сериал (ТЕСТ)
+# =========================
+async def api_add_series(request):
+    data = await request.json()
+
+    user_id = data["user_id"]
+    name = data["name"]
+    poster = data["poster"]
+
+    # пример эпизодов (заглушка)
+    episodes = {
+        "1": [{"episode": i, "air_date": "2024-01-01"} for i in range(1, 17)],
+        "2": [{"episode": i, "air_date": "2024-02-01"} for i in range(1, 17)]
+    }
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO series (user_id, name, poster, episodes_json)
+            VALUES ($1, $2, $3, $4)
+        """, user_id, name, poster, json.dumps(episodes))
+
+    return web.json_response({"ok": True})
+
+
+# =========================
+# 🚀 WEB SERVER
+# =========================
 async def start_web():
     app = web.Application()
 
     app.router.add_get("/api/series", api_series)
     app.router.add_get("/api/series_detail", api_series_detail)
-    app.router.add_post("/api/toggle_episode", toggle_episode)
+    app.router.add_post("/api/toggle_episode", api_toggle_episode)
+    app.router.add_post("/api/add_series", api_add_series)
 
-    app.router.add_static("/static/", path="./web", name="static")
+    return app
 
-    async def index(request):
-        return web.FileResponse("./web/index.html")
 
-    app.router.add_get("/", index)
+# =========================
+# ▶️ MAIN
+# =========================
+async def main():
+    await init_db()
+
+    app = await start_web()
 
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
-# ================= MAIN =================
+    await dp.start_polling(bot)
 
-async def main():
-    await init_db()
-    await asyncio.gather(
-        start_web(),
-        dp.start_polling(bot)
-    )
 
 if __name__ == "__main__":
     asyncio.run(main())
