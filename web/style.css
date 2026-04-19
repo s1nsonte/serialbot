@@ -1,4 +1,62 @@
-body {background:#111;color:white;font-family:sans-serif;}
-.card{margin:10px;background:#1c1c1c;border-radius:12px;overflow:hidden}
-.card img{width:100%}
-.title{padding:10px;font-size:18px}
+body {
+    margin: 0;
+    background: #0b0b0b;
+    color: white;
+    font-family: Arial;
+}
+
+#app {
+    padding: 15px;
+}
+
+.card {
+    background: #1c1c1c;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.card:hover {
+    transform: scale(1.02);
+}
+
+.card img {
+    width: 100%;
+}
+
+.title {
+    padding: 10px;
+    font-size: 16px;
+}
+
+.season {
+    margin-top: 20px;
+}
+
+.season h2 {
+    margin-bottom: 10px;
+}
+
+.episode {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    background: #1a1a1a;
+    margin-bottom: 5px;
+    border-radius: 8px;
+}
+
+.episode.watched {
+    background: #2e7d32;
+}
+
+.back {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: #333;
+    border-radius: 8px;
+    text-align: center;
+    cursor: pointer;
+}
