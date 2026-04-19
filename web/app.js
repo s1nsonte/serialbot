@@ -24,7 +24,7 @@ function loadSeries() {
             card.innerHTML = `
                 <img src="${s.poster}">
                 <div class="title">${s.name}</div>
-                <button class="open">▶ Смотреть</button>
+                <button onclick="openSeries(${s.id})">Подробнее</button>
             `;
 
             card.onclick = () => openSeries(s.id);
