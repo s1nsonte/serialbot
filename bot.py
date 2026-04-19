@@ -3,18 +3,15 @@ import logging
 import sqlite3
 import os
 import json
-from datetime import datetime
 from collections import defaultdict
 
 import aiohttp
 from aiohttp import web
-
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-# ================= CONFIG =================
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -22,18 +19,16 @@ BASE_URL = os.getenv("BASE_URL")
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN missing")
-
 if not BASE_URL:
     raise ValueError("BASE_URL missing")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ================= DB =================
-DATA_DIR = "./data"
-os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "db.sqlite")
+DB_PATH = "./data.db"
 
+
+# ================= DB =================
 
 def db():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -43,7 +38,7 @@ def init_db():
     with db() as conn:
         cur = conn.cursor()
 
-        cur.executescript("""
+        cur.execute("""
         CREATE TABLE IF NOT EXISTS series (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -51,20 +46,23 @@ def init_db():
             poster TEXT,
             tvmaze_id INTEGER,
             episodes_json TEXT
-        );
+        )
+        """)
 
+        cur.execute("""
         CREATE TABLE IF NOT EXISTS watched (
             series_id INTEGER,
             season INTEGER,
             episode INTEGER,
             UNIQUE(series_id, season, episode)
-        );
+        )
         """)
 
         conn.commit()
 
 
 # ================= TVMAZE =================
+
 async def get_tvmaze(query):
     async with aiohttp.ClientSession() as s:
         async with s.get(f"https://api.tvmaze.com/search/shows?q={query}") as r:
@@ -74,34 +72,40 @@ async def get_tvmaze(query):
             return data[0]["show"] if data else None
 
 
-async def get_episodes_map(tvmaze_id):
+async def get_episodes(tvmaze_id):
     async with aiohttp.ClientSession() as s:
         async with s.get(f"https://api.tvmaze.com/shows/{tvmaze_id}/episodes") as r:
             if r.status != 200:
-                return {}
+                return []
 
-            data = await r.json()
+            return await r.json()
 
-    result = defaultdict(int)
 
-    for ep in data:
-        if ep.get("season"):
-            result[ep["season"]] += 1
+def build_season_map(episodes):
+    result = defaultdict(list)
+
+    for ep in episodes:
+        if ep.get("season") and ep.get("number"):
+            result[ep["season"]].append({
+                "episode": ep["number"],
+                "name": ep["name"],
+                "airdate": ep["airdate"]
+            })
 
     return dict(result)
 
 
 # ================= BOT =================
+
 @dp.message(Command("start"))
 async def start(m: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="🎬 Открыть приложение",
+            text="🎬 Открыть",
             web_app=WebAppInfo(url=BASE_URL)
         )]
     ])
-
-    await m.answer("🍿 Открыть каталог сериалов", reply_markup=kb)
+    await m.answer("Сериалы 👇", reply_markup=kb)
 
 
 @dp.message(Command("add"))
@@ -113,12 +117,12 @@ async def add(m: types.Message):
         return
 
     show = await get_tvmaze(query)
-
     if not show:
-        await m.answer("❌ Не найдено")
+        await m.answer("Не найдено")
         return
 
-    episodes = await get_episodes_map(show["id"])
+    episodes = await get_episodes(show["id"])
+    season_map = build_season_map(episodes)
 
     with db() as conn:
         cur = conn.cursor()
@@ -129,9 +133,9 @@ async def add(m: types.Message):
         """, (
             m.from_user.id,
             show["name"],
-            show.get("image", {}).get("original"),
+            (show.get("image") or {}).get("original"),
             show["id"],
-            json.dumps(episodes)
+            json.dumps(season_map)
         ))
 
         conn.commit()
@@ -139,23 +143,35 @@ async def add(m: types.Message):
     await m.answer(f"✅ Добавлен: {show['name']}")
 
 
-# ================= API =================
-async def api_series(request):
-    user_id = request.query.get("user_id")
+@dp.message(Command("delete"))
+async def delete(m: types.Message):
+    query = m.text.replace("/delete", "").strip()
 
-    if not user_id:
-        return web.json_response([])
-
-    user_id = int(user_id)
+    if not query:
+        await m.answer("Напиши: /delete Название")
+        return
 
     with db() as conn:
         cur = conn.cursor()
+        cur.execute("""
+        DELETE FROM series
+        WHERE user_id=? AND name LIKE ?
+        """, (m.from_user.id, f"%{query}%"))
+        conn.commit()
 
-        cur.execute(
-            "SELECT id, name, poster FROM series WHERE user_id=?",
-            (user_id,)
-        )
+    await m.answer("🗑 Удалено")
 
+
+# ================= API =================
+
+async def api_series(request):
+    user_id = request.query.get("user_id")
+    if not user_id:
+        return web.json_response([])
+
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id,name,poster FROM series WHERE user_id=?", (user_id,))
         rows = cur.fetchall()
 
     return web.json_response([
@@ -165,116 +181,90 @@ async def api_series(request):
 
 
 async def api_series_detail(request):
-    series_id = request.query.get("series_id")
-
-    if not series_id:
-        return web.json_response({})
+    series_id = request.match_info["id"]
 
     with db() as conn:
         cur = conn.cursor()
 
-        cur.execute(
-            "SELECT name, poster, episodes_json FROM series WHERE id=?",
-            (series_id,)
-        )
-
+        cur.execute("SELECT episodes_json FROM series WHERE id=?", (series_id,))
         row = cur.fetchone()
 
         if not row:
             return web.json_response({})
 
-        name, poster, episodes_json = row
-        episodes = json.loads(episodes_json)
+        episodes = json.loads(row[0])
 
-        cur.execute(
-            "SELECT season, episode FROM watched WHERE series_id=?",
-            (series_id,)
-        )
+        cur.execute("SELECT season, episode FROM watched WHERE series_id=?", (series_id,))
+        watched = cur.fetchall()
 
-        watched_rows = cur.fetchall()
-
-    watched_map = defaultdict(list)
-
-    for s, e in watched_rows:
-        watched_map[s].append(e)
+    watched_set = {(w[0], w[1]) for w in watched}
 
     return web.json_response({
-        "id": series_id,
-        "name": name,
-        "poster": poster,
-        "episodes": episodes,
-        "watched": watched_map
+        "seasons": episodes,
+        "watched": list(watched_set)
     })
 
 
-async def api_mark(request):
+async def api_toggle_watch(request):
     data = await request.json()
 
-    series_id = data.get("series_id")
-    season = data.get("season")
-    episode = data.get("episode")
+    series_id = data["series_id"]
+    season = data["season"]
+    episode = data["episode"]
 
     with db() as conn:
         cur = conn.cursor()
 
         cur.execute("""
-        INSERT OR IGNORE INTO watched (series_id, season, episode)
-        VALUES (?, ?, ?)
+        SELECT 1 FROM watched
+        WHERE series_id=? AND season=? AND episode=?
         """, (series_id, season, episode))
 
-        conn.commit()
-
-    return web.json_response({"ok": True})
-
-
-async def api_delete(request):
-    data = await request.json()
-    series_id = data.get("series_id")
-
-    with db() as conn:
-        cur = conn.cursor()
-
-        cur.execute("DELETE FROM series WHERE id=?", (series_id,))
-        cur.execute("DELETE FROM watched WHERE series_id=?", (series_id,))
+        if cur.fetchone():
+            cur.execute("""
+            DELETE FROM watched
+            WHERE series_id=? AND season=? AND episode=?
+            """, (series_id, season, episode))
+        else:
+            cur.execute("""
+            INSERT OR IGNORE INTO watched(series_id, season, episode)
+            VALUES (?, ?, ?)
+            """, (series_id, season, episode))
 
         conn.commit()
 
     return web.json_response({"ok": True})
 
 
-# ================= WEB SERVER =================
+# ================= WEB =================
+
 async def start_web():
     app = web.Application()
 
-    # API
     app.router.add_get("/api/series", api_series)
-    app.router.add_get("/api/series_detail", api_series_detail)
-    app.router.add_post("/api/mark", api_mark)
-    app.router.add_post("/api/delete", api_delete)
+    app.router.add_get("/api/series/{id}", api_series_detail)
+    app.router.add_post("/api/toggle", api_toggle_watch)
 
-    # STATIC
     app.router.add_static("/static/", path="./web", name="static")
 
-    # INDEX
     async def index(request):
         return web.FileResponse("./web/index.html")
 
     app.router.add_get("/", index)
 
-    # RUN
     runner = web.AppRunner(app)
     await runner.setup()
 
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
-    print("🌐 WebApp запущен")
+    print("🌐 WebApp работает")
 
 
 # ================= MAIN =================
+
 async def main():
     init_db()
-
     await asyncio.gather(
         start_web(),
         dp.start_polling(bot)
