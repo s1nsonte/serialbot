@@ -28,6 +28,18 @@ body {
     font-weight: bold;
 }
 
+.progress {
+    height: 4px;
+    background: #333;
+    margin-top: 4px;
+    border-radius: 4px;
+}
+
+.bar {
+    height: 100%;
+    background: #e50914;
+    border-radius: 4px;
+}
 .season {
     margin-top: 20px;
 }
