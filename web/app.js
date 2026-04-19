@@ -1,34 +1,38 @@
 const tg = window.Telegram.WebApp;
 tg.expand();
 
-const user = tg.initDataUnsafe?.user;
+// fallback если Telegram не передал user
+let userId = null;
 
-if (!user) {
-    document.body.innerHTML = "Открыто вне Telegram";
+if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+    userId = tg.initDataUnsafe.user.id;
+} else {
+    // ВРЕМЕННЫЙ ФИКС (подставь свой ID)
+    userId = 271898917;
 }
 
-// ===== загрузка списка сериалов =====
-function loadSeries() {
-    fetch(`/api/series?user_id=${user.id}`)
-    .then(r => r.json())
-    .then(data => {
-        const app = document.getElementById("app");
-        app.innerHTML = "";
+fetch(`/api/series?user_id=${userId}`)
+.then(r => r.json())
+.then(data => {
+    const app = document.getElementById("app");
 
-        data.forEach(s => {
-            const d = document.createElement("div");
-            d.className = "card";
+    if (!data.length) {
+        app.innerHTML = "<div style='color:white'>Нет сериалов 😢</div>";
+        return;
+    }
 
-            d.innerHTML = `
-                <img src="${s.poster}">
-                <div class="title">${s.name}</div>
-            `;
+    data.forEach(s => {
+        const d = document.createElement("div");
+        d.className = "card";
 
-            d.onclick = () => openSeries(s.id, s.name);
+        d.innerHTML = `
+            <img src="${s.poster || ''}">
+            <div class="title">${s.name}</div>
+        `;
 
-            app.appendChild(d);
-        });
+        app.appendChild(d);
     });
+});
 }
 
 // ===== открыть сериал =====
