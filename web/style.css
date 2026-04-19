@@ -1,121 +1,122 @@
 body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #0b0b0b;
-    color: white;
+    margin:0;
+    background:#141414;
+    color:#fff;
+    font-family:Arial;
 }
 
 #app {
-    padding: 12px;
+    padding:10px;
 }
 
 /* ===== CARD ===== */
 .card {
-    position: relative;
-    margin-bottom: 16px;
-    border-radius: 12px;
-    overflow: hidden;
+    background:#1f1f1f;
+    border-radius:12px;
+    overflow:hidden;
+    margin-bottom:15px;
 }
 
 .card img {
-    width: 100%;
-    height: 220px;
-    object-fit: cover;
+    width:100%;
+    height:220px;
+    object-fit:cover;
 }
 
-.overlay {
-    position: absolute;
-    bottom: 0;
-    width: 100%;
-    padding: 12px;
-    background: linear-gradient(transparent, rgba(0,0,0,0.9));
+.card-body {
+    padding:10px;
 }
 
 .title {
-    font-size: 16px;
-    margin-bottom: 8px;
+    font-size:16px;
+    margin-bottom:6px;
 }
 
+.meta {
+    font-size:12px;
+    color:#aaa;
+}
+
+/* ===== BUTTON ===== */
 button {
-    background: #e50914;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 6px;
-    color: white;
-    cursor: pointer;
-}
-
-/* ===== HERO (фикс огромного постера) ===== */
-.hero img {
-    width: 100%;
-    height: 240px;
-    object-fit: cover;
-    border-radius: 12px;
-}
-
-.hero-title {
-    font-size: 20px;
-    margin: 10px 0;
-}
-
-/* ===== SEASON ===== */
-.season {
-    margin-top: 16px;
-}
-
-.season-header {
-    display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-    margin-bottom: 6px;
+    background:#e50914;
+    border:none;
+    padding:8px 12px;
+    color:#fff;
+    border-radius:6px;
+    margin-top:8px;
 }
 
 /* ===== PROGRESS ===== */
 .progress {
-    height: 4px;
-    background: #333;
-    border-radius: 4px;
-    margin-bottom: 8px;
+    height:4px;
+    background:#333;
+    margin:6px 0;
+    border-radius:4px;
 }
 
 .bar {
-    height: 100%;
-    background: #e50914;
-    border-radius: 4px;
+    height:100%;
+    background:#e50914;
 }
 
-/* ===== EPISODES GRID (ВАЖНО) ===== */
+/* ===== HERO ===== */
+.hero {
+    height:100vh;
+    background-size:cover;
+    background-position:center;
+}
+
+.overlay {
+    backdrop-filter: blur(15px);
+    background:rgba(0,0,0,0.7);
+    height:100%;
+    padding:20px;
+}
+
+/* ===== SEASONS ===== */
+.season-tabs {
+    display:flex;
+    gap:10px;
+    margin:10px 0;
+}
+
+.season-tabs div {
+    padding:6px 12px;
+    background:#333;
+    border-radius:20px;
+    cursor:pointer;
+}
+
+.season-tabs .active {
+    background:#e50914;
+}
+
+/* ===== EPISODES ===== */
 .episodes {
-    display: grid;
-    grid-template-columns: repeat(8, 1fr);
-    gap: 6px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
 }
 
-/* ===== EPISODE BUTTON ===== */
-.episode {
-    background: #222;
-    padding: 8px;
-    text-align: center;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
+.ep {
+    width:40px;
+    height:40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:6px;
+    background:#333;
+    cursor:pointer;
 }
 
-/* просмотрено */
-.episode.watched {
-    background: #e50914;
+.ep.watched {
+    background:#00c853;
 }
 
 /* ===== BACK ===== */
 .back {
-    margin-bottom: 10px;
-    cursor: pointer;
-    color: #aaa;
-}
-
-/* ===== DELETE ===== */
-.delete {
-    margin-top: 20px;
-    width: 100%;
-    background: #444;
+    position:fixed;
+    bottom:10px;
+    left:10px;
 }
