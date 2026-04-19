@@ -17,25 +17,28 @@ fetch(`/api/series/${id}`)
 
     Object.keys(seasons).forEach(season => {
 
-        const seasonDiv = document.createElement("div");
-        seasonDiv.className = "season";
+        const seasonBlock = document.createElement("div");
+        seasonBlock.className = "season-block";
 
-        seasonDiv.innerHTML = `<h2>Сезон ${season}</h2>`;
+        seasonBlock.innerHTML = `<h2>Сезон ${season}</h2>`;
+
+        const row = document.createElement("div");
+        row.className = "episodes-row";
 
         seasons[season].forEach(ep => {
 
             const key = `${season}-${ep.episode}`;
             const isWatched = watched.has(key);
 
-            const epDiv = document.createElement("div");
-            epDiv.className = "episode " + (isWatched ? "watched" : "");
+            const card = document.createElement("div");
+            card.className = "episode-card " + (isWatched ? "watched" : "");
 
-            epDiv.innerHTML = `
-                <span>Серия ${ep.episode}: ${ep.name}</span>
-                <span>${isWatched ? "✔" : ""}</span>
+            card.innerHTML = `
+                <div class="ep-number">E${ep.episode}</div>
+                <div class="ep-title">${ep.name}</div>
             `;
 
-            epDiv.onclick = async () => {
+            card.onclick = async () => {
                 await fetch("/api/toggle", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
@@ -46,14 +49,13 @@ fetch(`/api/series/${id}`)
                     })
                 });
 
-                epDiv.classList.toggle("watched");
-                epDiv.querySelector("span:last-child").innerText =
-                    epDiv.classList.contains("watched") ? "✔" : "";
+                card.classList.toggle("watched");
             };
 
-            seasonDiv.appendChild(epDiv);
+            row.appendChild(card);
         });
 
-        app.appendChild(seasonDiv);
+        seasonBlock.appendChild(row);
+        app.appendChild(seasonBlock);
     });
 });
