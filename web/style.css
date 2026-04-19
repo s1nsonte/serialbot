@@ -1,73 +1,58 @@
 body {
     margin: 0;
-    background: #0f0f0f;
+    background: #141414;
     color: white;
-    font-family: Arial;
+    font-family: Arial, sans-serif;
 }
 
 #app {
-    padding: 10px;
+    padding: 16px;
 }
 
 .card {
-    background: #1a1a1a;
+    margin-bottom: 20px;
     border-radius: 12px;
-    padding: 10px;
-    margin-bottom: 15px;
+    overflow: hidden;
+    background: #1f1f1f;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
 }
 
 .card img {
     width: 100%;
-    border-radius: 10px;
+    display: block;
 }
 
 .title {
+    padding: 10px;
     font-size: 18px;
-    margin: 5px 0;
-}
-
-button {
-    margin: 5px 5px 0 0;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-}
-
-.open {
-    background: #e50914;
-    color: white;
-}
-
-.delete {
-    background: #333;
-    color: white;
-}
-
-.poster {
-    width: 100%;
-    border-radius: 10px;
+    font-weight: bold;
 }
 
 .season {
-    margin-top: 15px;
+    margin-top: 20px;
 }
 
 .episode {
-    display: inline-block;
-    padding: 8px;
-    margin: 4px;
-    background: #222;
-    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    border-bottom: 1px solid #333;
     cursor: pointer;
 }
 
-.episode.watched {
+.episode:hover {
+    background: #2a2a2a;
+}
+
+.watched {
+    color: #00ff99;
+}
+
+button {
     background: #e50914;
-}
-
-.back {
-    margin-bottom: 10px;
+    border: none;
+    padding: 10px;
+    color: white;
+    border-radius: 8px;
     cursor: pointer;
-    color: #aaa;
 }
