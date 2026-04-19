@@ -2,9 +2,12 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 
 const user = tg.initDataUnsafe?.user;
-if(!user){document.body.innerHTML="Open from Telegram";}
+if (!user) {
+    document.body.innerHTML = "Open from Telegram";
+    throw new Error("No Telegram user");
+}
 
-fetch(`/api/series?user_id=${user.id}`)
+fetch(`${window.location.origin}/api/series?user_id=${user.id}`)
 .then(r=>r.json())
 .then(data=>{
     const app=document.getElementById("app");
