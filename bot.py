@@ -77,7 +77,6 @@ async def get_episodes(tvmaze_id):
         async with s.get(f"https://api.tvmaze.com/shows/{tvmaze_id}/episodes") as r:
             if r.status != 200:
                 return []
-
             return await r.json()
 
 
@@ -124,6 +123,12 @@ async def add(m: types.Message):
     episodes = await get_episodes(show["id"])
     season_map = build_season_map(episodes)
 
+    if not season_map:
+        await m.answer("Нет данных по сериям")
+        return
+
+    last_season = max(map(int, season_map.keys()))
+
     with db() as conn:
         cur = conn.cursor()
 
@@ -137,6 +142,17 @@ async def add(m: types.Message):
             show["id"],
             json.dumps(season_map)
         ))
+
+        series_id = cur.lastrowid
+
+        # 🔥 Автоматически отмечаем ВСЕ прошлые сезоны как просмотренные
+        for season, eps in season_map.items():
+            if int(season) < last_season:
+                for ep in eps:
+                    cur.execute("""
+                    INSERT OR IGNORE INTO watched(series_id, season, episode)
+                    VALUES (?, ?, ?)
+                    """, (series_id, int(season), ep["episode"]))
 
         conn.commit()
 
