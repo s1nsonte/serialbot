@@ -130,8 +130,12 @@ async def api_series(request):
 async def start_web():
     app = web.Application()
     app.router.add_get("/api/series", api_series)
-    app.router.add_static("/", path="./web", show_index=True)
+    app.router.add_static("/static/", path="./web", name="static")
 
+async def index(request):
+    return web.FileResponse("./web/index.html")
+
+app.router.add_get("/", index)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
