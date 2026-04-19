@@ -1,12 +1,9 @@
 let userId = null;
 
-if (window.Telegram && window.Telegram.WebApp) {
+if (window.Telegram?.WebApp) {
     const tg = window.Telegram.WebApp;
     tg.expand();
-
-    if (tg.initDataUnsafe?.user) {
-        userId = tg.initDataUnsafe.user.id;
-    }
+    userId = tg.initDataUnsafe?.user?.id;
 }
 
 if (!userId) userId = 271898917;
@@ -25,90 +22,77 @@ function loadSeries() {
             card.className = "card";
 
             card.innerHTML = `
-                <img src="${s.poster || ''}">
+                <img src="${s.poster}">
                 <div class="title">${s.name}</div>
-                <button class="open">Открыть</button>
-                <button class="delete">Удалить</button>
+                <button class="open">▶ Смотреть</button>
             `;
 
-            card.querySelector(".open").onclick = () => openSeries(s.id);
-            card.querySelector(".delete").onclick = () => deleteSeries(s.id);
+            card.onclick = () => openSeries(s.id);
 
             app.appendChild(card);
         });
     });
 }
 
-// ================= ОТКРЫТЬ СЕРИАЛ =================
+// ================= ОТКРЫТЬ =================
 function openSeries(id) {
     fetch(`/api/series_detail?series_id=${id}`)
     .then(r => r.json())
     .then(data => {
+
         app.innerHTML = `
             <div class="back">← Назад</div>
-            <h2>${data.name}</h2>
             <img class="poster" src="${data.poster}">
+            <h2>${data.name}</h2>
             <div id="seasons"></div>
         `;
 
         document.querySelector(".back").onclick = loadSeries;
 
-        const seasonsDiv = document.getElementById("seasons");
+        const container = document.getElementById("seasons");
 
-        Object.keys(data.episodes).forEach(season => {
-            const total = data.episodes[season];
-            const watched = data.watched[season] || [];
+        Object.keys(data.seasons).forEach(season => {
 
-            const seasonDiv = document.createElement("div");
-            seasonDiv.className = "season";
+            const seasonBlock = document.createElement("div");
+            seasonBlock.className = "season";
 
-            seasonDiv.innerHTML = `<h3>Сезон ${season}</h3>`;
+            seasonBlock.innerHTML = `<h3>Сезон ${season}</h3>`;
 
-            for (let i = 1; i <= total; i++) {
-                const ep = document.createElement("div");
-                ep.className = "episode";
+            data.seasons[season].forEach(ep => {
+                const el = document.createElement("div");
+                el.className = "episode";
 
-                if (watched.includes(i)) {
-                    ep.classList.add("watched");
+                if (ep.watched) el.classList.add("watched");
+                if (!ep.released) el.classList.add("locked");
+
+                el.innerText = `E${ep.episode}`;
+
+                if (ep.released) {
+                    el.onclick = () => mark(id, season, ep.episode, el);
                 }
 
-                ep.innerText = `E${i}`;
+                seasonBlock.appendChild(el);
+            });
 
-                ep.onclick = () => {
-                    markEpisode(id, season, i, ep);
-                };
-
-                seasonDiv.appendChild(ep);
-            }
-
-            seasonsDiv.appendChild(seasonDiv);
+            container.appendChild(seasonBlock);
         });
     });
 }
 
-// ================= ОТМЕТКА =================
-function markEpisode(seriesId, season, episode, el) {
+// ================= MARK =================
+function mark(seriesId, season, episode, el) {
     fetch("/api/mark", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({series_id: seriesId, season, episode})
+        body: JSON.stringify({
+            series_id: seriesId,
+            season,
+            episode
+        })
     })
     .then(() => {
         el.classList.add("watched");
     });
 }
 
-// ================= УДАЛЕНИЕ =================
-function deleteSeries(id) {
-    if (!confirm("Удалить сериал?")) return;
-
-    fetch("/api/delete", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({series_id: id})
-    })
-    .then(() => loadSeries());
-}
-
-// старт
 loadSeries();
