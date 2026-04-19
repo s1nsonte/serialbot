@@ -1,11 +1,11 @@
 import asyncio
 import logging
-import sqlite3
 import os
 import json
 from collections import defaultdict
 
 import aiohttp
+import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -16,6 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
 BASE_URL = os.getenv("BASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN missing")
@@ -23,31 +24,29 @@ if not TOKEN:
 if not BASE_URL:
     raise ValueError("BASE_URL missing")
 
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL missing")
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-DATA_DIR = "./data"
-os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "db.sqlite")
+pool = None
 
 # ================= DB =================
-def db():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
-def init_db():
-    with db() as conn:
-        cur = conn.cursor()
-
-        cur.executescript("""
+async def init_db():
+    async with pool.acquire() as conn:
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS series (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
             name TEXT,
             poster TEXT,
             tvmaze_id INTEGER,
             episodes_json TEXT
         );
+        """)
 
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS watched (
             series_id INTEGER,
             season INTEGER,
@@ -55,7 +54,6 @@ def init_db():
             UNIQUE(series_id, season, episode)
         );
         """)
-        conn.commit()
 
 # ================= API =================
 async def get_tvmaze(query):
@@ -113,12 +111,11 @@ async def add(m: types.Message):
 
     last_season = max(map(int, episodes.keys()))
 
-    with db() as conn:
-        cur = conn.cursor()
-
-        cur.execute("""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
         INSERT INTO series (user_id, name, poster, tvmaze_id, episodes_json)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
         """, (
             m.from_user.id,
             show["name"],
@@ -127,23 +124,21 @@ async def add(m: types.Message):
             json.dumps(episodes)
         ))
 
-        series_id = cur.lastrowid
+        series_id = row["id"]
 
-        # ✅ все прошлые сезоны → просмотрены
+        # старые сезоны → просмотрены
         for season, total in episodes.items():
             season = int(season)
 
             if season < last_season:
                 for ep in range(1, total + 1):
-                    cur.execute("""
-                    INSERT OR IGNORE INTO watched (series_id, season, episode)
-                    VALUES (?, ?, ?)
+                    await conn.execute("""
+                    INSERT INTO watched (series_id, season, episode)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT DO NOTHING
                     """, (series_id, season, ep))
 
-        conn.commit()
-
     await m.answer(f"✅ Добавлен: {show['name']}")
-
 
 # ================= API SERVER =================
 async def api_series(request):
@@ -152,15 +147,13 @@ async def api_series(request):
     if not user_id:
         return web.json_response([])
 
-    user_id = int(user_id)
-
-    with db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT id,name,poster FROM series WHERE user_id=?", (user_id,))
-        rows = cur.fetchall()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+        SELECT id, name, poster FROM series WHERE user_id=$1
+        """, int(user_id))
 
     return web.json_response([
-        {"id": r[0], "name": r[1], "poster": r[2]}
+        {"id": r["id"], "name": r["name"], "poster": r["poster"]}
         for r in rows
     ])
 
@@ -168,27 +161,20 @@ async def api_series(request):
 async def api_series_detail(request):
     series_id = request.query.get("series_id")
 
-    if not series_id:
-        return web.json_response({"error": "no id"})
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+        SELECT name, poster, episodes_json FROM series WHERE id=$1
+        """, int(series_id))
 
-    with db() as conn:
-        cur = conn.cursor()
+        episodes = json.loads(row["episodes_json"])
 
-        cur.execute("SELECT name, poster, episodes_json FROM series WHERE id=?", (series_id,))
-        row = cur.fetchone()
-
-        if not row:
-            return web.json_response({"error": "not found"})
-
-        name, poster, episodes_json = row
-        episodes = json.loads(episodes_json)
-
-        cur.execute("SELECT season, episode FROM watched WHERE series_id=?", (series_id,))
-        watched = cur.fetchall()
+        watched_rows = await conn.fetch("""
+        SELECT season, episode FROM watched WHERE series_id=$1
+        """, int(series_id))
 
     watched_map = {}
-    for s, e in watched:
-        watched_map.setdefault(s, set()).add(e)
+    for r in watched_rows:
+        watched_map.setdefault(r["season"], set()).add(r["episode"])
 
     seasons = []
 
@@ -202,8 +188,8 @@ async def api_series_detail(request):
         })
 
     return web.json_response({
-        "name": name,
-        "poster": poster,
+        "name": row["name"],
+        "poster": row["poster"],
         "seasons": sorted(seasons, key=lambda x: x["season"])
     })
 
@@ -211,46 +197,34 @@ async def api_series_detail(request):
 async def toggle_episode(request):
     data = await request.json()
 
-    series_id = data["series_id"]
-    season = data["season"]
-    episode = data["episode"]
-
-    with db() as conn:
-        cur = conn.cursor()
-
-        cur.execute("""
-        SELECT 1 FROM watched WHERE series_id=? AND season=? AND episode=?
-        """, (series_id, season, episode))
-
-        exists = cur.fetchone()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow("""
+        SELECT 1 FROM watched
+        WHERE series_id=$1 AND season=$2 AND episode=$3
+        """, data["series_id"], data["season"], data["episode"])
 
         if exists:
-            cur.execute("""
-            DELETE FROM watched WHERE series_id=? AND season=? AND episode=?
-            """, (series_id, season, episode))
+            await conn.execute("""
+            DELETE FROM watched
+            WHERE series_id=$1 AND season=$2 AND episode=$3
+            """, data["series_id"], data["season"], data["episode"])
         else:
-            cur.execute("""
+            await conn.execute("""
             INSERT INTO watched (series_id, season, episode)
-            VALUES (?, ?, ?)
-            """, (series_id, season, episode))
-
-        conn.commit()
+            VALUES ($1, $2, $3)
+            """, data["series_id"], data["season"], data["episode"])
 
     return web.json_response({"ok": True})
 
 
 async def delete_series(request):
     data = await request.json()
-    series_id = data["series_id"]
 
-    with db() as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM series WHERE id=?", (series_id,))
-        cur.execute("DELETE FROM watched WHERE series_id=?", (series_id,))
-        conn.commit()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM series WHERE id=$1", data["series_id"])
+        await conn.execute("DELETE FROM watched WHERE series_id=$1", data["series_id"])
 
     return web.json_response({"ok": True})
-
 
 # ================= WEB =================
 async def start_web():
@@ -277,10 +251,14 @@ async def start_web():
 
     print("🌐 WebApp запущен")
 
-
 # ================= MAIN =================
 async def main():
-    init_db()
+    global pool
+
+    pool = await asyncpg.create_pool(DATABASE_URL)
+
+    await init_db()
+
     await asyncio.gather(
         start_web(),
         dp.start_polling(bot)
